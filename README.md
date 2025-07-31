@@ -1,4 +1,4 @@
-
+# create_QR usage
 
 Linux
 
@@ -8,4 +8,4 @@ source venv/bin/activate
 pip install qrcode[pil]
 pip install Pillow
 python qrturner.py
-``` # create_QR
+``` 

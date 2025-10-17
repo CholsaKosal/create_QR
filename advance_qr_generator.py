@@ -4,6 +4,7 @@ from reportlab.lib.pagesizes import A1, A2, A3, A4, A5
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
 import os
+import math
 
 # Page sizes for PDF output, mapping string names to reportlab objects and dimensions in cm
 PAGE_SIZES = {
@@ -22,7 +23,7 @@ def cm_to_pixels(cm_value):
 def get_qr_data():
     """Gets the data for QR codes from the user, handling single or range types."""
     while True:
-        print("Select the type of QR code to generate:")
+        print("\nSelect the type of QR code to generate:")
         print("1: Single link or text")
         print("2: Range of numbers (e.g., from 001 to 100)")
         choice = input("Enter your choice (1 or 2): ")
@@ -66,7 +67,7 @@ def generate_qr_image(data, qr_width_px, qr_height_px, include_text=False):
         font = ImageFont.truetype("arial.ttf", 28)
     except IOError:
         # Fallback to a default font if Arial is not found
-        font = ImageFont.load_default(30)
+        font = ImageFont.load_default(size=32)
         print("⚠️ Arial font not found. Using default font.")
 
     text_bbox = font.getbbox(data)
@@ -98,10 +99,9 @@ def main():
 
     # 2. Get QR dimensions in cm
     try:
-        qr_height_cm = float(input("Enter QR height in cm: "))
-        print(f"  -> Height set to: {qr_height_cm} cm")
-        qr_width_cm = float(input("Enter QR width in cm: "))
-        print(f"  -> Width set to: {qr_width_cm} cm")
+        print("\nEnter QR code dimensions:")
+        qr_height_cm = float(input("  -> Enter QR height in cm: "))
+        qr_width_cm = float(input("  -> Enter QR width in cm: "))
     except ValueError:
         print("❌ Invalid input for dimensions. Please enter a number.")
         return
@@ -112,7 +112,7 @@ def main():
 
     # 3. Choose output format
     while True:
-        output_format = input("Choose output format (PNG or PDF): ").upper()
+        output_format = input("\nChoose output format (PNG or PDF): ").upper()
         if output_format in ["PNG", "PDF"]:
             break
         print("❌ Invalid format. Please choose PNG or PDF.")
@@ -126,7 +126,7 @@ def main():
     qr_images = [generate_qr_image(data, qr_width_px, qr_height_px, include_text) for data in qr_data_list]
     print("✅ All QR code images generated.")
     
-    output_filename = input("Enter the output filename (without extension): ")
+    output_filename = input("\nEnter the output filename (without extension): ")
 
     if output_format == "PNG":
         # PNG specific settings
@@ -137,18 +137,14 @@ def main():
                 print("❌ Must be a positive number.")
                 return
 
-            # Calculate rows and columns
             rows = (total_qrs + qrs_per_row - 1) // qrs_per_row
             
-            # Calculate final PNG dimensions
             single_qr_w, single_qr_h = qr_images[0].size
             final_width = single_qr_w * qrs_per_row
             final_height = single_qr_h * rows
             
-            # Create the final canvas
             final_png = Image.new('RGB', (final_width, final_height), 'white')
             
-            # Paste QR codes
             for i, qr_img in enumerate(qr_images):
                 row_idx = i // qrs_per_row
                 col_idx = i % qrs_per_row
@@ -164,61 +160,107 @@ def main():
             return
 
     elif output_format == "PDF":
-        # PDF specific settings
+        # --- ENHANCED PDF SETTINGS ---
+        # 1. Get page size first
         while True:
-            page_size_name = input(f"Choose PDF page size ({', '.join(PAGE_SIZES.keys())}): ").upper()
+            page_size_name = input(f"\nChoose PDF page size ({', '.join(PAGE_SIZES.keys())}): ").upper()
             if page_size_name in PAGE_SIZES:
                 break
             print("❌ Invalid page size.")
-        
-        output_path = f"{output_filename}.pdf"
         page_size, page_width_cm, page_height_cm = PAGE_SIZES[page_size_name]
-        c = canvas.Canvas(output_path, pagesize=page_size)
-        
-        # Margins
+
+        # 2. Get QR count preference
+        qr_count_choice = input("Enter number of QRs per page, or 'max' for automatic fitting: ").lower()
+
+        # 3. Get spacing between QRs
+        try:
+            row_spacing_cm = float(input("Enter space between QR rows (cm): "))
+            col_spacing_cm = float(input("Enter space between QR columns (cm): "))
+        except ValueError:
+            print("❌ Invalid spacing value. Please enter a number.")
+            return
+
+        # Define margins and drawable area
         margin_cm = 1.0
         drawable_width_cm = page_width_cm - (2 * margin_cm)
         drawable_height_cm = page_height_cm - (2 * margin_cm)
 
-        # Calculate how many QR codes can fit
-        qrs_per_row = int(drawable_width_cm // qr_width_cm)
-        qrs_per_col = int(drawable_height_cm // qr_height_cm)
-        qrs_per_page = qrs_per_row * qrs_per_col
+        # 4. Calculate layout based on user choice
+        if qr_count_choice == 'max':
+            eff_qr_width = qr_width_cm + col_spacing_cm
+            eff_qr_height = qr_height_cm + row_spacing_cm
+            if eff_qr_width <= 0 or eff_qr_height <= 0:
+                 print("❌ QR dimensions plus spacing must be positive.")
+                 return
+            qrs_per_row = int((drawable_width_cm + col_spacing_cm) // eff_qr_width)
+            qrs_per_col = int((drawable_height_cm + row_spacing_cm) // eff_qr_height)
+            if qrs_per_row == 0 or qrs_per_col == 0:
+                print(f"❌ QR code is too large to fit on an {page_size_name} page.")
+                return
+            qrs_to_place_on_page = qrs_per_row * qrs_per_col
+        else:
+            try:
+                num_qrs = int(qr_count_choice)
+                if num_qrs <= 0:
+                    print("❌ Number of QRs must be positive.")
+                    return
+                # Find a balanced grid layout (e.g., for 10, try 3x4)
+                rows = int(math.sqrt(num_qrs))
+                cols = math.ceil(num_qrs / rows)
+                
+                total_width = (cols * qr_width_cm) + (max(0, cols - 1) * col_spacing_cm)
+                total_height = (rows * qr_height_cm) + (max(0, rows - 1) * row_spacing_cm)
 
-        print(f"📄 Layout: {qrs_per_row} across, {qrs_per_col} down. ({qrs_per_page} QRs per page).")
+                if total_width > drawable_width_cm or total_height > drawable_height_cm:
+                    print(f"❌ A {rows}x{cols} grid for {num_qrs} QRs does not fit on {page_size_name}.")
+                    print(f"  -> Needs: {total_width:.2f}x{total_height:.2f} cm | Available: {drawable_width_cm:.2f}x{drawable_height_cm:.2f} cm")
+                    return
+                qrs_per_row = cols
+                qrs_per_col = rows
+                qrs_to_place_on_page = num_qrs
+            except ValueError:
+                print("❌ Invalid input. Please enter a number or 'max'.")
+                return
+
+        print(f"📄 Layout: {qrs_per_row} across, {qrs_per_col} down. (Placing up to {qrs_to_place_on_page} QRs per page).")
         
-        # Draw QR codes page by page
-        x_start_cm = margin_cm
-        y_start_cm = page_height_cm - margin_cm
+        # --- PDF DRAWING LOGIC ---
+        output_path = f"{output_filename}.pdf"
+        c = canvas.Canvas(output_path, pagesize=page_size)
+        
+        grid_w = (qrs_per_row * qr_width_cm) + (max(0, qrs_per_row - 1) * col_spacing_cm)
+        grid_h = (qrs_per_col * qr_height_cm) + (max(0, qrs_per_col - 1) * row_spacing_cm)
+        
+        # Center the entire grid on the page
+        x_start = (page_width_cm - grid_w) / 2
+        y_start = page_height_cm - (page_height_cm - grid_h) / 2
 
         current_qr_index = 0
         while current_qr_index < len(qr_images):
-            x_pos_cm = x_start_cm
-            y_pos_cm = y_start_cm
+            qrs_on_this_page = 0
+            y_pos = y_start - qr_height_cm
             
             for row in range(qrs_per_col):
-                if current_qr_index >= len(qr_images): break
-                y_pos_cm -= qr_height_cm
-                
+                if current_qr_index >= len(qr_images) or qrs_on_this_page >= qrs_to_place_on_page: break
+                x_pos = x_start
                 for col in range(qrs_per_row):
-                    if current_qr_index >= len(qr_images): break
+                    if current_qr_index >= len(qr_images) or qrs_on_this_page >= qrs_to_place_on_page: break
                     
-                    # Save temporary image to draw on PDF
                     temp_img_path = f"temp_qr_{current_qr_index}.png"
                     qr_images[current_qr_index].save(temp_img_path)
                     
-                    # Draw on canvas
-                    c.drawImage(temp_img_path, x_pos_cm * cm, y_pos_cm * cm, width=qr_width_cm * cm, height=qr_height_cm * cm)
+                    c.drawImage(temp_img_path, x_pos * cm, y_pos * cm, width=qr_width_cm*cm, height=qr_height_cm*cm)
                     
-                    os.remove(temp_img_path) # Clean up temp file
+                    os.remove(temp_img_path)
                     
-                    x_pos_cm += qr_width_cm
+                    x_pos += qr_width_cm + col_spacing_cm
                     current_qr_index += 1
+                    qrs_on_this_page += 1
                 
-                x_pos_cm = x_start_cm # Reset x for next row
+                y_pos -= (qr_height_cm + row_spacing_cm)
 
             if current_qr_index < len(qr_images):
-                c.showPage() # Create a new page if more QRs exist
+                c.showPage()
         
         c.save()
 

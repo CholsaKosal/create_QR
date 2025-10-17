@@ -63,10 +63,10 @@ def generate_qr_image(data, qr_width_px, qr_height_px, include_text=False):
 
     # Add space for text below the QR code
     try:
-        font = ImageFont.truetype("arial.ttf", 24)
+        font = ImageFont.truetype("arial.ttf", 28)
     except IOError:
         # Fallback to a default font if Arial is not found
-        font = ImageFont.load_default()
+        font = ImageFont.load_default(30)
         print("⚠️ Arial font not found. Using default font.")
 
     text_bbox = font.getbbox(data)
